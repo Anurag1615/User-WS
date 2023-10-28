@@ -1,13 +1,21 @@
 package com.main.UserWS.security;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
-import org.springframework.beans.factory.annotation.Autowired;
+import java.util.Base64;
+import java.util.Date;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.springframework.core.env.Environment;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.core.userdetails.User;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,38 +23,58 @@ import com.main.UserWS.Model.LoginRequestModel;
 import com.main.UserWS.service.UserService;
 import com.main.UserWS.shared.UserDto;
 
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 public class AuthenticationFilter extends UsernamePasswordAuthenticationFilter {
-	
-	@Autowired 
-	UserService userService;
 
-public AuthenticationFilter(AuthenticationManager authenticationManager) {
-	super(authenticationManager);
-	// TODO Auto-generated constructor stub
-}
-public Authentication attemptAuthentication (HttpServletRequest request,HttpServletResponse response)
-{
-	LoginRequestModel cred = null;
-	try {
-		cred = new ObjectMapper().readValue(request.getInputStream(),LoginRequestModel.class);
-	} catch (IOException e) {
-		// TODO Auto-generated catch block
-		e.printStackTrace();
+	private UserService usersService;
+	private Environment environment;
+
+	public AuthenticationFilter(UserService usersService, Environment environment,
+			AuthenticationManager authenticationManager) {
+		super(authenticationManager);
+		this.usersService = usersService;
+		this.environment = environment;
 	}
-	
-	return getAuthenticationManager().authenticate(new UsernamePasswordAuthenticationToken(cred.getEmail(),cred.getPassword(),new ArrayList<>()));
-}
-@Override
-protected void successfulAuthentication(HttpServletRequest req, HttpServletResponse res, FilterChain chain,
-		Authentication auth) throws IOException, ServletException {
 
+	@Override
+	public Authentication attemptAuthentication(HttpServletRequest req, HttpServletResponse res)
+			throws AuthenticationException {
+		try {
 
-	String userName = ((User) auth.getPrincipal()).getUsername();
-	UserDto userDetails = userService.getUserDetailsByEmail(userName);
-}
+			LoginRequestModel creds = new ObjectMapper().readValue(req.getInputStream(), LoginRequestModel.class);
+
+			return getAuthenticationManager().authenticate(
+					new UsernamePasswordAuthenticationToken(creds.getEmail(), creds.getPassword(), new ArrayList<>()));
+
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	@Override
+	protected void successfulAuthentication(HttpServletRequest req, HttpServletResponse res, FilterChain chain,
+			Authentication auth) throws IOException, ServletException {
+
+		String userName = ((User) auth.getPrincipal()).getUsername();
+		UserDto userDetails = usersService.getUserDetailsByEmail(userName);
+		String tokenSecret = environment.getProperty("token.secret");
+		byte[] secretKeyBytes = Base64.getEncoder().encode(tokenSecret.getBytes());
+		SecretKey secretKey = new SecretKeySpec(secretKeyBytes, SignatureAlgorithm.HS512.getJcaName());
+
+		Instant now = Instant.now();
+
+		String token = Jwts.builder().setSubject(userDetails.getUserId())
+				.setExpiration(
+						Date.from(now.plusMillis(Long.parseLong(environment.getProperty("token.expiration_time")))))
+				.setIssuedAt(Date.from(now)).signWith(secretKey, SignatureAlgorithm.HS512).compact();
+
+		res.addHeader("token", token);
+		res.addHeader("userId", userDetails.getUserId());
+	}
 }
