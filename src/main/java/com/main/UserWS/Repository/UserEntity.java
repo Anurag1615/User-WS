@@ -28,10 +28,10 @@ public class UserEntity implements Serializable {
 	@Column(nullable=false, length=120, unique=true)
 	private String email;
 	
-	@Column(nullable=false, unique=true)
+	@Column(nullable=false, unique=false)
 	private String userId;
 	
-	@Column(nullable=false, unique=true)	
+	@Column(nullable=false, unique=false)	
 	private String encryptedPassword;
 	
 	
